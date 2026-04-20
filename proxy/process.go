@@ -79,6 +79,8 @@ type Process struct {
 
 	// track the number of failed starts
 	failedStartCount int
+
+	smartAllocation smartAllocationDecision
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
@@ -125,6 +127,30 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		gracefulStopTimeout: 10 * time.Second,
 		cmdWaitChan:         make(chan struct{}),
 	}
+}
+
+func (p *Process) InFlightRequests() int {
+	return int(p.inFlightRequestsCount.Load())
+}
+
+func (p *Process) ConcurrencyLimit() int {
+	return cap(p.concurrencyLimitSemaphore)
+}
+
+func (p *Process) QueueRatio() float64 {
+	limit := p.ConcurrencyLimit()
+	if limit <= 0 {
+		return 1
+	}
+	return float64(p.InFlightRequests()) / float64(limit)
+}
+
+func (p *Process) CanAcceptRequest() bool {
+	state := p.CurrentState()
+	if state == StateShutdown || state == StateStopping {
+		return false
+	}
+	return len(p.concurrencyLimitSemaphore) < cap(p.concurrencyLimitSemaphore)
 }
 
 // LogMonitor returns the log monitor associated with the process.
@@ -227,10 +253,11 @@ func (p *Process) start() error {
 		return fmt.Errorf("unable to get sanitized command: %v", err)
 	}
 	env := append([]string{}, p.config.Env...)
-	args, env, smartAllocation, err := applySmartAllocation(p.ID, p.config, args, env)
+	args, env, smartAllocation, err := applySmartAllocationForProcess(p.ID, p.ID, p.config, args, env)
 	if err != nil {
 		return fmt.Errorf("unable to apply smart allocation: %v", err)
 	}
+	p.smartAllocation = smartAllocation
 	if smartAllocation.Enabled {
 		p.proxyLogger.Infof(
 			"<%s> smart allocation devices=%v tp=%d context=%d max_running=%d mem_fraction=%.2f weights=%d kv=%d reason=%s",
@@ -293,11 +320,13 @@ func (p *Process) start() error {
 	if err != nil {
 		if curState, swapErr := p.swapState(StateStarting, StateStopped); swapErr != nil {
 			p.forceState(StateStopped) // force it into a stopped state
+			releaseSmartAllocationReservation(p.ID)
 			return fmt.Errorf(
 				"failed to start command '%s' and state swap failed. command error: %v, current state: %v, state swap error: %v",
 				strings.Join(args, " "), err, curState, swapErr,
 			)
 		}
+		releaseSmartAllocationReservation(p.ID)
 		return fmt.Errorf("start() failed for command '%s': %v", strings.Join(args, " "), err)
 	}
 
@@ -592,6 +621,8 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 // waitForCmd waits for the command to exit and handles exit conditions depending on current state
 func (p *Process) waitForCmd() {
+	defer releaseSmartAllocationReservation(p.ID)
+
 	exitErr := p.cmd.Wait()
 	p.proxyLogger.Debugf("<%s> cmd.Wait() returned error: %v", p.ID, exitErr)
 

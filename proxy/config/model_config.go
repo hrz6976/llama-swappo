@@ -50,6 +50,10 @@ type ModelConfig struct {
 	// backends. It is intentionally optional so static configurations keep the
 	// exact behavior they had before.
 	SmartAlloc SmartAllocConfig `yaml:"smartAlloc"`
+
+	// AutoScale enables best-effort same-model replica scaling. Replicas are
+	// started on demand when the currently running replicas are saturated.
+	AutoScale AutoScaleConfig `yaml:"autoscale"`
 }
 
 type SmartAllocConfig struct {
@@ -91,6 +95,28 @@ type SmartAllocConfig struct {
 
 	// Backend currently supports automatic rewriting for SGLang launch commands.
 	Backend string `yaml:"backend"`
+}
+
+type AutoScaleConfig struct {
+	Enabled bool `yaml:"enabled"`
+
+	// MinReplicas is the number of replicas to keep warm. The current
+	// implementation starts replicas lazily, so values greater than one define
+	// the floor for scale-down rather than eager preload behavior.
+	MinReplicas int `yaml:"minReplicas"`
+	MaxReplicas int `yaml:"maxReplicas"`
+
+	// ScaleUpQueueRatio triggers a new replica when every active replica is at
+	// or above this in-flight/capacity ratio.
+	ScaleUpQueueRatio float64 `yaml:"scaleUpQueueRatio"`
+
+	// ScaleDownIdleSeconds stops extra ready replicas after they have no
+	// in-flight requests for this long.
+	ScaleDownIdleSeconds int `yaml:"scaleDownIdleSeconds"`
+
+	// CooldownSeconds limits replica churn by enforcing a minimum interval
+	// between scale-up or scale-down decisions.
+	CooldownSeconds int `yaml:"cooldownSeconds"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

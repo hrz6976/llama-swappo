@@ -568,12 +568,6 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 			return
 		}
 
-		process, ok := pg.processes[realModelName]
-		if !ok {
-			pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Process for model %s not found in group %s", realModelName, pg.id))
-			return
-		}
-
 		openAIMessages := ollamaMessagesToOpenAI(ollamaReq.Messages)
 		openAITools := ollamaToolsToOpenAI(ollamaReq.Tools)
 		modelNameToUse := realModelName
@@ -608,11 +602,17 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 			c.Header("Connection", "keep-alive")
 
 			trw := newTransformingResponseWriter(c.Writer, ollamaReq.Model, true)
-			process.ProxyRequest(trw, proxyDestReq)
+			if err := pg.ProxyRequest(realModelName, trw, proxyDestReq); err != nil {
+				pm.sendOllamaError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
 			trw.Flush()
 		} else {
 			recorder := httptest.NewRecorder()
-			process.ProxyRequest(recorder, proxyDestReq)
+			if err := pg.ProxyRequest(realModelName, recorder, proxyDestReq); err != nil {
+				pm.sendOllamaError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
 
 			if recorder.Code != http.StatusOK {
 				var openAIError struct {
@@ -710,12 +710,6 @@ func (pm *ProxyManager) ollamaGenerateHandler() gin.HandlerFunc {
 			return
 		}
 
-		process, ok := pg.processes[realModelName]
-		if !ok {
-			pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Process for model %s not found in group %s", realModelName, pg.id))
-			return
-		}
-
 		modelNameToUse := realModelName
 		if pm.config.Models[realModelName].UseModelName != "" {
 			modelNameToUse = pm.config.Models[realModelName].UseModelName
@@ -749,11 +743,17 @@ func (pm *ProxyManager) ollamaGenerateHandler() gin.HandlerFunc {
 			c.Header("Connection", "keep-alive")
 
 			trw := newTransformingResponseWriter(c.Writer, ollamaReq.Model, false)
-			process.ProxyRequest(trw, proxyDestReq)
+			if err := pg.ProxyRequest(realModelName, trw, proxyDestReq); err != nil {
+				pm.sendOllamaError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
 			trw.Flush()
 		} else {
 			recorder := httptest.NewRecorder()
-			process.ProxyRequest(recorder, proxyDestReq)
+			if err := pg.ProxyRequest(realModelName, recorder, proxyDestReq); err != nil {
+				pm.sendOllamaError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
 
 			if recorder.Code != http.StatusOK {
 				var openAIError struct {
@@ -828,12 +828,6 @@ func (pm *ProxyManager) ollamaEmbedHandler() gin.HandlerFunc {
 			pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Error selecting model process: %v", err))
 			return
 		}
-		process, ok := pg.processes[realModelName]
-		if !ok {
-			pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Process for model %s not found in group %s", realModelName, pg.id))
-			return
-		}
-
 		modelNameToUse := realModelName
 		if pm.config.Models[realModelName].UseModelName != "" {
 			modelNameToUse = pm.config.Models[realModelName].UseModelName
@@ -874,7 +868,10 @@ func (pm *ProxyManager) ollamaEmbedHandler() gin.HandlerFunc {
 		proxyDestReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(openAIReqBody)))
 
 		recorder := httptest.NewRecorder()
-		process.ProxyRequest(recorder, proxyDestReq)
+		if err := pg.ProxyRequest(realModelName, recorder, proxyDestReq); err != nil {
+			pm.sendOllamaError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
 
 		// CORS handling
 		if origin := c.Request.Header.Get("Origin"); origin != "" {
@@ -957,12 +954,6 @@ func (pm *ProxyManager) ollamaLegacyEmbeddingsHandler() gin.HandlerFunc {
 			pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Error selecting model process: %v", err))
 			return
 		}
-		process, ok := pg.processes[realModelName]
-		if !ok {
-			pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Process for model %s not found in group %s", realModelName, pg.id))
-			return
-		}
-
 		modelNameToUse := realModelName
 		if pm.config.Models[realModelName].UseModelName != "" {
 			modelNameToUse = pm.config.Models[realModelName].UseModelName
@@ -995,7 +986,10 @@ func (pm *ProxyManager) ollamaLegacyEmbeddingsHandler() gin.HandlerFunc {
 		proxyDestReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(openAIReqBody)))
 
 		recorder := httptest.NewRecorder()
-		process.ProxyRequest(recorder, proxyDestReq)
+		if err := pg.ProxyRequest(realModelName, recorder, proxyDestReq); err != nil {
+			pm.sendOllamaError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
 
 		// CORS handling
 		if origin := c.Request.Header.Get("Origin"); origin != "" {

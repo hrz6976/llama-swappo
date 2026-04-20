@@ -81,12 +81,24 @@ models:
       reserveBytes: 6442450944
       overheadBytes: 1073741824
       maxGPUs: 6
+    autoscale:
+      enabled: true
+      maxReplicas: 6
+      scaleUpQueueRatio: 0.75
+      scaleDownIdleSeconds: 300
+      cooldownSeconds: 30
 ```
 
 This is inspired by Ollama's scheduler, but it is not a byte-for-byte port:
 Ollama can ask its runner for pre-load fit/alloc memory data, while SGLang does
 not expose the same fit API here. The allocator therefore uses model size plus a
 KV-cache estimate and leaves an explicit per-GPU reserve.
+
+`autoscale` is request-queue based. It keeps the first replica lazy-loaded,
+then starts another same-model process when all active replicas are saturated.
+Each extra replica gets a fresh local port and, when `smartAlloc` is enabled,
+a reservation-aware GPU placement so concurrent startups do not all pick the
+same free VRAM.
 
 ## Support
 

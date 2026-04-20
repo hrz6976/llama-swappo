@@ -130,6 +130,48 @@ func TestApplySmartAllocationSkipsUnsupportedBackend(t *testing.T) {
 	assert.Contains(t, decision.Reason, "unsupported")
 }
 
+func TestApplySmartAllocationForProcessSubtractsReservations(t *testing.T) {
+	oldDiscover := discoverGPUInfo
+	oldReservations := smartAllocationReservations
+	defer func() {
+		discoverGPUInfo = oldDiscover
+		smartAllocationReservations = oldReservations
+	}()
+	discoverGPUInfo = func() ([]gpuMemoryInfo, error) {
+		return []gpuMemoryInfo{
+			{Index: 0, TotalBytes: 48 * gib, FreeBytes: 44 * gib},
+			{Index: 1, TotalBytes: 48 * gib, FreeBytes: 44 * gib},
+		}, nil
+	}
+	smartAllocationReservations = make(map[string]smartAllocationReservation)
+
+	modelConfig := config.ModelConfig{
+		SmartAlloc: config.SmartAllocConfig{
+			Enabled:          true,
+			Backend:          "sglang",
+			ModelSizeBytes:   5 * gib,
+			PreferredContext: 131072,
+			MinContext:       32768,
+			MaxParallel:      1,
+			MinParallel:      1,
+			ReserveBytes:     6 * gib,
+			OverheadBytes:    1 * gib,
+			KVBytesPerToken:  128 * kib,
+			MaxGPUs:          1,
+		},
+		Metadata: map[string]any{"parameterSize": "7B"},
+	}
+	args := []string{"python3", "-m", "sglang.launch_server"}
+
+	_, _, first, err := applySmartAllocationForProcess("model#0", "model", modelConfig, args, nil)
+	require.NoError(t, err)
+	_, _, second, err := applySmartAllocationForProcess("model#1", "model", modelConfig, args, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, []int{0}, first.Devices)
+	assert.Equal(t, []int{1}, second.Devices)
+}
+
 func countArg(args []string, arg string) int {
 	count := 0
 	for _, item := range args {

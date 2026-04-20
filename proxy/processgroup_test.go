@@ -6,9 +6,11 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var processGroupTestConfig = config.AddDefaultGroupToConfig(config.Config{
@@ -115,5 +117,94 @@ func TestProcessGroup_ProxyRequestSwapIsFalse(t *testing.T) {
 	// make sure all the processes are running
 	for _, process := range pg.processes {
 		assert.Equal(t, StateReady, process.CurrentState())
+	}
+}
+
+func TestProcessGroup_AutoScaleUsesBaseReplicaOnColdStart(t *testing.T) {
+	modelConfig := getTestSimpleResponderConfig("autoscale-cold")
+	modelConfig.AutoScale = config.AutoScaleConfig{
+		Enabled:           true,
+		MaxReplicas:       2,
+		CooldownSeconds:   1,
+		ScaleUpQueueRatio: 0.5,
+	}
+	cfg := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"autoscale-cold": modelConfig,
+		},
+		Groups: map[string]config.GroupConfig{
+			"G": {
+				Swap:    false,
+				Members: []string{"autoscale-cold"},
+			},
+		},
+	})
+
+	pg := NewProcessGroup("G", cfg, testLogger, testLogger)
+	defer pg.StopProcesses(StopWaitForInflightRequest)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+
+	require.NoError(t, pg.ProxyRequest("autoscale-cold", w, req))
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, pg.replicaSets["autoscale-cold"].Replicas, 1)
+	assert.Equal(t, "autoscale-cold", pg.replicaSets["autoscale-cold"].Replicas[0].ID)
+}
+
+func TestProcessGroup_AutoScaleStartsReplicaWhenSaturated(t *testing.T) {
+	modelConfig := getTestSimpleResponderConfig("autoscale-hot")
+	modelConfig.ConcurrencyLimit = 1
+	modelConfig.AutoScale = config.AutoScaleConfig{
+		Enabled:           true,
+		MaxReplicas:       2,
+		CooldownSeconds:   1,
+		ScaleUpQueueRatio: 0.5,
+	}
+	cfg := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"autoscale-hot": modelConfig,
+		},
+		Groups: map[string]config.GroupConfig{
+			"G": {
+				Swap:    false,
+				Members: []string{"autoscale-hot"},
+			},
+		},
+	})
+
+	pg := NewProcessGroup("G", cfg, testLogger, testLogger)
+	defer pg.StopProcesses(StopWaitForInflightRequest)
+
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest("GET", "/slow-respond?echo=first&delay=700ms", nil)
+		w := httptest.NewRecorder()
+		_ = pg.ProxyRequest("autoscale-hot", w, req)
+		firstDone <- w
+	}()
+
+	require.Eventually(t, func() bool {
+		return pg.replicaSets["autoscale-hot"].Replicas[0].InFlightRequests() == 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	secondReq := httptest.NewRequest("GET", "/slow-respond?echo=second&delay=10ms", nil)
+	second := httptest.NewRecorder()
+	require.NoError(t, pg.ProxyRequest("autoscale-hot", second, secondReq))
+	assert.Equal(t, http.StatusOK, second.Code)
+	assert.Contains(t, second.Body.String(), "second")
+
+	require.Len(t, pg.replicaSets["autoscale-hot"].Replicas, 2)
+	assert.Equal(t, "autoscale-hot#1", pg.replicaSets["autoscale-hot"].Replicas[1].ID)
+	assert.NotEqual(t, pg.replicaSets["autoscale-hot"].Replicas[0].config.Proxy, pg.replicaSets["autoscale-hot"].Replicas[1].config.Proxy)
+
+	select {
+	case first := <-firstDone:
+		assert.Equal(t, http.StatusOK, first.Code)
+		assert.Contains(t, first.Body.String(), "first")
+	case <-time.After(10 * time.Second):
+		t.Fatal("first request did not complete")
 	}
 }

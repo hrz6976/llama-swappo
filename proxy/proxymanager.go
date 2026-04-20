@@ -1193,17 +1193,20 @@ func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {
 	runningProcesses := make([]gin.H, 0) // Default to an empty response.
 
 	for _, processGroup := range pm.processGroups {
-		for _, process := range processGroup.processes {
-			if process.CurrentState() == StateReady {
-				runningProcesses = append(runningProcesses, gin.H{
-					"model":       process.ID,
-					"state":       process.state,
-					"cmd":         process.config.Cmd,
-					"proxy":       process.config.Proxy,
-					"ttl":         process.config.UnloadAfter,
-					"name":        process.config.Name,
-					"description": process.config.Description,
-				})
+		for _, replicaSet := range processGroup.replicaSets {
+			for _, process := range replicaSet.Replicas {
+				if process.CurrentState() == StateReady {
+					runningProcesses = append(runningProcesses, gin.H{
+						"model":       replicaSet.ModelID,
+						"replica":     process.ID,
+						"state":       process.state,
+						"cmd":         process.config.Cmd,
+						"proxy":       process.config.Proxy,
+						"ttl":         process.config.UnloadAfter,
+						"name":        process.config.Name,
+						"description": process.config.Description,
+					})
+				}
 			}
 		}
 	}

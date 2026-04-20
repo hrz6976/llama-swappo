@@ -227,7 +227,7 @@
                         "default": {},
                         "description": "Dictionary of arbitrary values included in /v1/models. Can contain complex types. Only passed through in /v1/models responses."
                     },
-                    "smartAlloc": {
+	                    "smartAlloc": {
                         "type": "object",
                         "additionalProperties": false,
                         "properties": {
@@ -301,10 +301,54 @@
                                 "description": "Use every available GPU up to maxGPUs instead of the smallest fitting set."
                             }
                         },
-                        "default": {},
-                        "description": "Best-effort Ollama-inspired runtime allocator for SGLang commands."
-                    },
-                    "concurrencyLimit": {
+	                        "default": {},
+	                        "description": "Best-effort Ollama-inspired runtime allocator for SGLang commands."
+	                    },
+	                    "autoscale": {
+	                        "type": "object",
+	                        "additionalProperties": false,
+	                        "properties": {
+	                            "enabled": {
+	                                "type": "boolean",
+	                                "default": false,
+	                                "description": "Enable same-model replica scaling when all active replicas are saturated."
+	                            },
+	                            "minReplicas": {
+	                                "type": "integer",
+	                                "minimum": 1,
+	                                "default": 1,
+	                                "description": "Minimum replicas to keep in the replica set. Replicas are still started lazily."
+	                            },
+	                            "maxReplicas": {
+	                                "type": "integer",
+	                                "minimum": 1,
+	                                "default": 1,
+	                                "description": "Maximum same-model replicas that may be created."
+	                            },
+	                            "scaleUpQueueRatio": {
+	                                "type": "number",
+	                                "minimum": 0,
+	                                "maximum": 1,
+	                                "default": 0.75,
+	                                "description": "Start another replica when every active replica is at or above this in-flight/concurrency ratio."
+	                            },
+	                            "scaleDownIdleSeconds": {
+	                                "type": "integer",
+	                                "minimum": 1,
+	                                "default": 180,
+	                                "description": "Stop extra ready replicas after this many idle seconds."
+	                            },
+	                            "cooldownSeconds": {
+	                                "type": "integer",
+	                                "minimum": 1,
+	                                "default": 30,
+	                                "description": "Minimum time between autoscale decisions."
+	                            }
+	                        },
+	                        "default": {},
+	                        "description": "Best-effort request-queue based same-model replica autoscaling."
+	                    },
+	                    "concurrencyLimit": {
                         "type": "integer",
                         "minimum": 0,
                         "default": 0,

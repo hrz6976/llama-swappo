@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
@@ -36,6 +37,16 @@ type smartAllocationDecision struct {
 
 var discoverGPUInfo = discoverNvidiaSMIGPUs
 
+type smartAllocationReservation struct {
+	Devices []int
+	Bytes   uint64
+}
+
+var (
+	smartAllocationMu           sync.Mutex
+	smartAllocationReservations = make(map[string]smartAllocationReservation)
+)
+
 func applySmartAllocation(modelID string, modelConfig config.ModelConfig, args []string, env []string) ([]string, []string, smartAllocationDecision, error) {
 	policy := modelConfig.SmartAlloc
 	if !policy.Enabled {
@@ -52,6 +63,82 @@ func applySmartAllocation(modelID string, modelConfig config.ModelConfig, args [
 	}
 	if len(gpus) == 0 {
 		return args, env, smartAllocationDecision{Enabled: false, Reason: "no GPUs discovered"}, nil
+	}
+
+	return applySmartAllocationWithGPUs(modelID, modelConfig, args, env, gpus)
+}
+
+func applySmartAllocationForProcess(processID string, modelID string, modelConfig config.ModelConfig, args []string, env []string) ([]string, []string, smartAllocationDecision, error) {
+	if !modelConfig.SmartAlloc.Enabled {
+		return applySmartAllocation(modelID, modelConfig, args, env)
+	}
+
+	smartAllocationMu.Lock()
+	defer smartAllocationMu.Unlock()
+
+	gpus, err := discoverGPUInfo()
+	if err != nil {
+		return args, env, smartAllocationDecision{Enabled: false, Reason: fmt.Sprintf("gpu discovery failed: %v", err)}, nil
+	}
+	if len(gpus) == 0 {
+		return args, env, smartAllocationDecision{Enabled: false, Reason: "no GPUs discovered"}, nil
+	}
+
+	delete(smartAllocationReservations, processID)
+	gpus = subtractSmartAllocationReservations(gpus)
+
+	nextArgs, nextEnv, decision, err := applySmartAllocationWithGPUs(modelID, modelConfig, args, env, gpus)
+	if err != nil {
+		return nextArgs, nextEnv, decision, err
+	}
+	if decision.Enabled && len(decision.Devices) > 0 {
+		smartAllocationReservations[processID] = smartAllocationReservation{
+			Devices: decision.Devices,
+			Bytes:   decision.EstimatedWeights + decision.EstimatedKV,
+		}
+	}
+	return nextArgs, nextEnv, decision, nil
+}
+
+func releaseSmartAllocationReservation(processID string) {
+	smartAllocationMu.Lock()
+	defer smartAllocationMu.Unlock()
+	delete(smartAllocationReservations, processID)
+}
+
+func subtractSmartAllocationReservations(gpus []gpuMemoryInfo) []gpuMemoryInfo {
+	reservedByGPU := make(map[int]uint64)
+	for _, reservation := range smartAllocationReservations {
+		if len(reservation.Devices) == 0 || reservation.Bytes == 0 {
+			continue
+		}
+		perGPU := reservation.Bytes / uint64(len(reservation.Devices))
+		for _, device := range reservation.Devices {
+			reservedByGPU[device] += perGPU
+		}
+	}
+
+	adjusted := make([]gpuMemoryInfo, len(gpus))
+	copy(adjusted, gpus)
+	for i := range adjusted {
+		reserved := reservedByGPU[adjusted[i].Index]
+		if reserved >= adjusted[i].FreeBytes {
+			adjusted[i].FreeBytes = 0
+		} else {
+			adjusted[i].FreeBytes -= reserved
+		}
+	}
+	return adjusted
+}
+
+func applySmartAllocationWithGPUs(modelID string, modelConfig config.ModelConfig, args []string, env []string, gpus []gpuMemoryInfo) ([]string, []string, smartAllocationDecision, error) {
+	policy := modelConfig.SmartAlloc
+	if !policy.Enabled {
+		return args, env, smartAllocationDecision{Enabled: false, Reason: "disabled"}, nil
+	}
+	backend := strings.ToLower(strings.TrimSpace(policy.Backend))
+	if backend != "" && backend != "sglang" {
+		return args, env, smartAllocationDecision{Enabled: false, Reason: fmt.Sprintf("unsupported smartAlloc backend %q", policy.Backend)}, nil
 	}
 
 	decision, err := chooseSmartAllocation(modelID, modelConfig, args, gpus)
