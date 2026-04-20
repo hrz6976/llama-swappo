@@ -227,6 +227,83 @@
                         "default": {},
                         "description": "Dictionary of arbitrary values included in /v1/models. Can contain complex types. Only passed through in /v1/models responses."
                     },
+                    "smartAlloc": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "enabled": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Enable runtime GPU selection and SGLang launch argument rewriting for this model."
+                            },
+                            "backend": {
+                                "type": "string",
+                                "enum": [
+                                    "",
+                                    "sglang"
+                                ],
+                                "default": "sglang",
+                                "description": "Backend whose command-line arguments should be rewritten. Currently supports sglang."
+                            },
+                            "modelSizeBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "On-disk model size used as a conservative loaded-weight estimate."
+                            },
+                            "preferredContext": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Desired context length. The allocator tries to preserve this before increasing parallelism."
+                            },
+                            "maxContext": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Maximum context length, typically the model's trained context. 0 means uncapped."
+                            },
+                            "minContext": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Smallest context length the allocator may choose under memory pressure."
+                            },
+                            "maxParallel": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Maximum SGLang --max-running-requests value."
+                            },
+                            "minParallel": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Minimum SGLang --max-running-requests value."
+                            },
+                            "reserveBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Free VRAM to leave on each selected GPU for activations, CUDA graphs, and fragmentation."
+                            },
+                            "overheadBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Model-level additive memory reservation."
+                            },
+                            "kvBytesPerToken": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Override for KV cache pressure estimate. 0 uses a parameter-size heuristic."
+                            },
+                            "maxGPUs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Maximum number of GPUs to select. 0 means no explicit cap."
+                            },
+                            "preferSpread": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Use every available GPU up to maxGPUs instead of the smallest fitting set."
+                            }
+                        },
+                        "default": {},
+                        "description": "Best-effort Ollama-inspired runtime allocator for SGLang commands."
+                    },
                     "concurrencyLimit": {
                         "type": "integer",
                         "minimum": 0,

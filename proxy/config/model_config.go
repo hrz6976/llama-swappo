@@ -45,6 +45,52 @@ type ModelConfig struct {
 	// These are merged with request-level values, with request values taking precedence
 	// Useful for setting model-specific defaults like enable_thinking for Qwen3
 	ChatTemplateKwargs map[string]any `yaml:"chatTemplateKwargs"`
+
+	// SmartAlloc enables best-effort runtime GPU selection for command-based
+	// backends. It is intentionally optional so static configurations keep the
+	// exact behavior they had before.
+	SmartAlloc SmartAllocConfig `yaml:"smartAlloc"`
+}
+
+type SmartAllocConfig struct {
+	Enabled bool `yaml:"enabled"`
+
+	// ModelSizeBytes is the on-disk model size. It is used as a conservative
+	// proxy for loaded weights when the backend cannot provide a pre-load fit
+	// estimate like Ollama's runner can.
+	ModelSizeBytes uint64 `yaml:"modelSizeBytes"`
+
+	// PreferredContext is the desired context length. MaxContext caps it to the
+	// model's trained context length when known.
+	PreferredContext int `yaml:"preferredContext"`
+	MaxContext       int `yaml:"maxContext"`
+	MinContext       int `yaml:"minContext"`
+
+	// MaxParallel maps to SGLang's --max-running-requests. MinParallel is used
+	// when memory pressure forces the launcher to reduce concurrency.
+	MaxParallel int `yaml:"maxParallel"`
+	MinParallel int `yaml:"minParallel"`
+
+	// ReserveBytes is left free on every selected GPU for activations, CUDA graph
+	// buffers, and allocator fragmentation. OverheadBytes is a model-level
+	// additive reservation.
+	ReserveBytes  uint64 `yaml:"reserveBytes"`
+	OverheadBytes uint64 `yaml:"overheadBytes"`
+
+	// KVBytesPerToken overrides the heuristic used to estimate KV cache memory
+	// pressure. Lower values allow longer contexts and more parallel requests.
+	KVBytesPerToken uint64 `yaml:"kvBytesPerToken"`
+
+	// MaxGPUs limits tensor parallel width. Zero means no explicit limit.
+	MaxGPUs int `yaml:"maxGPUs"`
+
+	// PreferSpread uses every available GPU up to MaxGPUs instead of the
+	// smallest fitting set. This is useful for very large models, but usually
+	// slower for small models.
+	PreferSpread bool `yaml:"preferSpread"`
+
+	// Backend currently supports automatic rewriting for SGLang launch commands.
+	Backend string `yaml:"backend"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

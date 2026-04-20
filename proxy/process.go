@@ -226,6 +226,27 @@ func (p *Process) start() error {
 	if err != nil {
 		return fmt.Errorf("unable to get sanitized command: %v", err)
 	}
+	env := append([]string{}, p.config.Env...)
+	args, env, smartAllocation, err := applySmartAllocation(p.ID, p.config, args, env)
+	if err != nil {
+		return fmt.Errorf("unable to apply smart allocation: %v", err)
+	}
+	if smartAllocation.Enabled {
+		p.proxyLogger.Infof(
+			"<%s> smart allocation devices=%v tp=%d context=%d max_running=%d mem_fraction=%.2f weights=%d kv=%d reason=%s",
+			p.ID,
+			smartAllocation.Devices,
+			smartAllocation.TPSize,
+			smartAllocation.ContextLength,
+			smartAllocation.MaxRunning,
+			smartAllocation.MemFraction,
+			smartAllocation.EstimatedWeights,
+			smartAllocation.EstimatedKV,
+			smartAllocation.Reason,
+		)
+	} else if smartAllocation.Reason != "disabled" {
+		p.proxyLogger.Warnf("<%s> smart allocation skipped: %s", p.ID, smartAllocation.Reason)
+	}
 
 	if curState, err := p.swapState(StateStopped, StateStarting); err != nil {
 		if err == ErrExpectedStateMismatch {
@@ -253,7 +274,7 @@ func (p *Process) start() error {
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
 	p.cmd.Stdout = p.processLogger
 	p.cmd.Stderr = p.processLogger
-	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
+	p.cmd.Env = append(p.cmd.Environ(), env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
 	setProcAttributes(p.cmd)
@@ -265,7 +286,7 @@ func (p *Process) start() error {
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 
-	p.proxyLogger.Debugf("<%s> Executing start command: %s, env: %s", p.ID, strings.Join(args, " "), strings.Join(p.config.Env, ", "))
+	p.proxyLogger.Debugf("<%s> Executing start command: %s, env: %s", p.ID, strings.Join(args, " "), strings.Join(env, ", "))
 	err = p.cmd.Start()
 
 	// Set process state to failed

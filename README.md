@@ -55,6 +55,39 @@ model1:
     quantizationLevel: 4Q_K_M # probably not needed
 ```
 
+### Smart SGLang allocation
+
+`smartAlloc` can rewrite SGLang launch arguments when a model is loaded. It
+queries `nvidia-smi`, picks a GPU set based on current free VRAM, prioritizes
+the requested context length, then rewrites `CUDA_VISIBLE_DEVICES`,
+`--tp-size`, `--context-length`, `--max-running-requests`, and
+`--mem-fraction-static`.
+
+```yaml
+models:
+  qwen2.5-7b:
+    cmd: >
+      python3 -m sglang.launch_server --host 127.0.0.1 --port ${PORT}
+      --model-path /models/qwen2.5-7b.gguf --served-model-name qwen2.5-7b
+      --context-length 131072 --max-running-requests 4 --load-format gguf
+    smartAlloc:
+      enabled: true
+      backend: sglang
+      modelSizeBytes: 4683078320
+      preferredContext: 131072
+      minContext: 32768
+      maxParallel: 4
+      minParallel: 1
+      reserveBytes: 6442450944
+      overheadBytes: 1073741824
+      maxGPUs: 6
+```
+
+This is inspired by Ollama's scheduler, but it is not a byte-for-byte port:
+Ollama can ask its runner for pre-load fit/alloc memory data, while SGLang does
+not expose the same fit API here. The allocator therefore uses model size plus a
+KV-cache estimate and leaves an explicit per-GPU reserve.
+
 ## Support
 
 This was a personal tweak so I could play with local models in Github Copilot without having to deal with ollama.
