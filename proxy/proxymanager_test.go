@@ -1289,11 +1289,11 @@ func TestProxyManager_ApiGetVersion(t *testing.T) {
 	versionTest := map[string]string{
 		"build_date": "1970-01-01T00:00:00Z",
 		"commit":     "cc915ddb6f04a42d9cd1f524e1d46ec6ed069fdc",
-		"version":    "v001",
+		"version":    "0.13.5",
 	}
 
 	proxy := New(config)
-	proxy.SetVersion(versionTest["build_date"], versionTest["commit"], versionTest["version"])
+	proxy.SetVersion(versionTest["build_date"], versionTest["commit"], "v001")
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	req := httptest.NewRequest("GET", "/api/version", nil)
